@@ -7,17 +7,37 @@ import (
 	"strings"
 )
 
-func ChatApi(model string, openaiApiKey string, message string) (string, error) {
+type Role string
+
+const (
+	User   Role = "user"
+	System Role = "system"
+)
+
+type Msg struct {
+	Role    Role
+	Content string
+}
+
+func (m *Msg) Pack() openaigo.ChatMessage {
+	return openaigo.ChatMessage{
+		Role:    string(m.Role),
+		Content: m.Content,
+	}
+}
+
+func ChatApi(model string, openaiApiKey string, msgs []Msg) (string, error) {
 	client := openaigo.NewClient(openaiApiKey)
+	openaiMsgs := make([]openaigo.ChatMessage, 0, len(msgs))
+	for _, msg := range msgs {
+		openaiMsgs = append(openaiMsgs, msg.Pack())
+	}
 	request := openaigo.ChatCompletionRequestBody{
-		Model: model,
-		Messages: []openaigo.ChatMessage{
-			{Role: "user", Content: message},
-		},
+		Model:    model,
+		Messages: openaiMsgs,
 	}
 	ctx := context.Background()
 	response, err := client.Chat(ctx, request)
-	//fmt.Println(response, err)
 	if err != nil {
 		return "", err
 	}
