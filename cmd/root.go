@@ -8,9 +8,13 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/fatih/color"
 	"github.com/gosuri/uilive"
+	"github.com/pkg/term/termios"
 	"github.com/yzc1114/ChatCLI/api"
+	"golang.org/x/sys/unix"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -53,6 +57,12 @@ Set timeout to 30 seconds, enter interactive mode: ChatCLI -t 30 -i
 	RunE: func(cmd *cobra.Command, args []string) error { return rootRun(cmd, args) },
 }
 
+var (
+	// workaround to capture Ctrl+C
+	ttyFD           int
+	originalTermios *unix.Termios
+)
+
 func init() {
 	viper.AutomaticEnv()
 	flags := rootCmd.PersistentFlags()
@@ -66,6 +76,17 @@ func init() {
 
 	for _, f := range []string{FlagOpenAiAPIKey, FlagModelAlias, FlagRenderPlainText, FlagInteractive, FlagRenderStyle, FlagTimeout} {
 		_ = viper.BindPFlag(f, flags.Lookup(f))
+	}
+
+	var err error
+	ttyFD, err = syscall.Open("/dev/tty", syscall.O_RDONLY, 0)
+	if err != nil {
+		panic(err)
+	}
+	// get the original settings
+	originalTermios, err = termios.Tcgetattr(uintptr(ttyFD))
+	if err != nil {
+		panic(err)
 	}
 }
 
@@ -94,6 +115,10 @@ func callAPIDisposable(modelAlias string, openaiApiKey string, message string) (
 }
 
 func callAPI(modelAlias string, openaiApiKey string, msgs []api.Msg) (string, error) {
+	// restore the original settings to allow ctrl-c to generate signal
+	if err := termios.Tcsetattr(uintptr(ttyFD), termios.TCSANOW, originalTermios); err != nil {
+		panic(err)
+	}
 	openaiModel := aliasToOpenAiModel[modelAlias]
 	timeoutDuration := time.Duration(viper.GetInt64(FlagTimeout)) * time.Second
 	type Result struct {
@@ -101,12 +126,12 @@ func callAPI(modelAlias string, openaiApiKey string, msgs []api.Msg) (string, er
 		err  error
 	}
 	ch := make(chan Result)
-	ctx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
-	defer cancel()
-	go func(ctx context.Context) {
+	timeoutCtx, cancelTimeout := context.WithTimeout(context.Background(), timeoutDuration)
+	defer cancelTimeout()
+	go func() {
 		resp, err := api.ChatApi(openaiModel, openaiApiKey, msgs)
 		ch <- Result{resp, err}
-	}(ctx)
+	}()
 
 	writer := uilive.New()
 	writer.Start()
@@ -119,7 +144,6 @@ func callAPI(modelAlias string, openaiApiKey string, msgs []api.Msg) (string, er
 
 	defer func() {
 		writer.Stop()
-		clearLine()
 	}()
 
 	updateWaitingLine := func() func() {
@@ -132,12 +156,31 @@ func callAPI(modelAlias string, openaiApiKey string, msgs []api.Msg) (string, er
 		}
 	}()
 
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt)
+	exitCtx, cancelExit := context.WithCancel(context.Background())
+
+	go func() {
+		select {
+		case <-timeoutCtx.Done():
+			return
+		case <-sigs:
+			cancelExit()
+		}
+	}()
+
 	for {
 		select {
 		case r := <-ch:
+			clearLine()
 			return r.resp, r.err
-		case <-ctx.Done():
+		case <-timeoutCtx.Done():
+			clearLine()
 			return "", fmt.Errorf("timeout in %d seconds", timeoutDuration/time.Second)
+		case <-exitCtx.Done():
+			clearLine()
+			fmt.Println("canceled. Ctrl+C again to quit")
+			return "", nil
 		default:
 			updateWaitingLine()
 			time.Sleep(100 * time.Millisecond)
@@ -176,6 +219,7 @@ func Execute() {
 
 func rootRun(cmd *cobra.Command, args []string) error {
 	text := strings.Join(args, " ")
+	text = strings.TrimSpace(text)
 	openaiApiKey := viper.GetString(FlagOpenAiAPIKey)
 	modelAlias := viper.GetString(FlagModelAlias)
 	renderStyle := viper.GetString(FlagRenderStyle)
@@ -218,15 +262,23 @@ func interactiveMessages(openaiApiKey string, modelAlias string, firstText strin
 	records := make([]api.Msg, 0)
 
 	handleUserMsg := func(text string) error {
-		records = append(records, api.Msg{
+		text = strings.TrimSpace(text)
+		if len(text) == 0 {
+			return nil
+		}
+		appendedRecords := append(records, api.Msg{
 			Role:    api.User,
 			Content: text,
 		})
-		response, err := callAPI(modelAlias, openaiApiKey, records)
+		response, err := callAPI(modelAlias, openaiApiKey, appendedRecords)
 		if err != nil {
 			printCallAPIError(err)
 			return err
 		}
+		if len(response) == 0 {
+			return nil
+		}
+		records = appendedRecords
 		render(response)
 		records = append(records, api.Msg{
 			Role:    api.System,
@@ -310,6 +362,9 @@ func interactiveMessages(openaiApiKey string, modelAlias string, firstText strin
 }
 
 func render(text string) {
+	if len(text) == 0 {
+		return
+	}
 	var renderPlainText = func(text string) {
 		fmt.Println(text)
 	}

@@ -23,7 +23,7 @@ To install ChatCLI, clone the repository and build the binary:
 ```
 git clone https://github.com/yzc1114/ChatCLI.git
 cd ChatCLI
-go build -o ChatCLI
+go build -o chat-cli
 ```
 
 ### From Binary
@@ -34,25 +34,25 @@ go build -o ChatCLI
 ### Ask a single message:
 
 ```
-ChatCLI [Content]
+chat-cli [Content]
 ```
 
 ### Enter interactive mode:
 
 ```
-ChatCLI -i [Optional: First Sentence]
+chat-cli -i [Optional: First Sentence]
 ```
 
 ### Use a specific markdown rendering style:
 
 ```
-ChatCLI -s dracula [Content]
+chat-cli -s dracula [Content]
 ```
 
 ### Set timeout and enter interactive mode:
 
 ```
-ChatCLI -t 30 -i
+chat-cli -t 30 -i
 ```
 
 ## Examples
@@ -60,25 +60,25 @@ ChatCLI -t 30 -i
 1. Asking a single message:
 
    ```
-   ChatCLI "What is the capital of France?"
+   chat-cli "What is the capital of France?"
    ```
 
 2. Entering interactive mode with an initial message:
 
    ```
-   ChatCLI -i "Tell me a joke."
+   chat-cli -i "Tell me a joke."
    ```
 
 3. Using the Dracula markdown rendering style:
 
    ```
-   ChatCLI -s dracula "What is the meaning of life?"
+   chat-cli -s dracula "What is the meaning of life?"
    ```
 
 4. Setting a 30-second timeout and entering interactive mode:
 
    ```
-   ChatCLI -t 30 -i
+   chat-cli -t 30 -i
    ```
 
 ## Flags
