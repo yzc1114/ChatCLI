@@ -26,6 +26,13 @@ cd ChatCLI
 go build -o chat-cli
 ```
 
+### From Script
+Using `install.sh` in the root directory. Or run:
+
+``` shell
+sudo sh -c "$(curl -fsSL https://raw.githubusercontent.com/yzc1114/ChatCLI/master/install.sh)"
+```
+
 ### From Binary
 // TODO
 
